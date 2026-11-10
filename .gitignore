@@ -4,3 +4,6 @@
 *.sqlite.gz
 *.db
 /data/
+/examples/fixture/data/
+/examples/fixture/backups/
+/examples/fixture/uploads/
