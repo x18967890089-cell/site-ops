@@ -1,0 +1,24 @@
+{
+  "name": "我的小站",
+  "root": ".",
+  "db": {
+    "driver": "sqlite",
+    "path": "data/app.db"
+  },
+  "tables": ["posts", "photos"],
+  "uploads": {
+    "dir": "uploads",
+    "table": "photos",
+    "columns": ["filename", "thumb"]
+  },
+  "backup": {
+    "dir": "backups",
+    "keep": 14,
+    "mirror": "",
+    "max_age_hours": 48
+  },
+  "require_extensions": ["pdo_sqlite", "mbstring"],
+  "flags": {
+    "APP_DEBUG": "0"
+  }
+}

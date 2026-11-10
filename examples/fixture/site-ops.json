@@ -1,0 +1,20 @@
+{
+  "name": "fixture site",
+  "root": ".",
+  "db": {
+    "driver": "sqlite",
+    "path": "data/app.db"
+  },
+  "tables": ["posts", "photos"],
+  "uploads": {
+    "dir": "uploads",
+    "table": "photos",
+    "columns": ["filename", "thumb"]
+  },
+  "backup": {
+    "dir": "backups",
+    "keep": 3,
+    "max_age_hours": 48
+  },
+  "require_extensions": ["pdo_sqlite"]
+}

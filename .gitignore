@@ -1,0 +1,6 @@
+/site-ops.json
+/backups/
+*.sqlite
+*.sqlite.gz
+*.db
+/data/

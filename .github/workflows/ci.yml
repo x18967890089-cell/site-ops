@@ -1,0 +1,158 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: php lint (${{ matrix.php }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.1', '8.2', '8.3']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: pdo_sqlite, mbstring, curl
+          coverage: none
+
+      - name: 语法检查
+        run: |
+          set -euo pipefail
+          for f in bin/*.php examples/fixture/seed.php examples/fixture/www/ok.php; do
+            php -l "$f"
+          done
+
+      - name: --help 必须退 0，参数错必须退 2
+        run: |
+          set -euo pipefail
+          php bin/health-check.php --help > /dev/null
+          php bin/backup-now.php --help > /dev/null
+          php bin/check-links.php --help > /dev/null
+
+          set +e
+          php bin/check-links.php --depth=abc 2>/dev/null; code=$?
+          set -e
+          test "$code" -eq 2 || { echo "expected exit 2, got $code"; exit 1; }
+
+  e2e:
+    name: 真跑四个脚本
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: pdo_sqlite, mbstring, curl
+          coverage: none
+
+      - name: 造夹具
+        run: php examples/fixture/seed.php
+
+      - name: health-check 必须抓到两个孤儿文件并退 1
+        run: |
+          set -euo pipefail
+          set +e
+          out=$(php bin/health-check.php --config=examples/fixture/site-ops.json 2>&1)
+          code=$?
+          set -e
+          echo "$out"
+          test "$code" -eq 1 || { echo "expected exit 1, got $code"; exit 1; }
+          echo "$out" | grep -q 'gone.jpg' || { echo 'missing orphan report'; exit 1; }
+
+      - name: health-check --json 契约
+        run: |
+          set -euo pipefail
+          php bin/health-check.php --config=examples/fixture/site-ops.json --json > /tmp/h.json || true
+          php -r '
+            $d = json_decode(file_get_contents("/tmp/h.json"), true);
+            if (!is_array($d)) { fwrite(STDERR, "not json\n"); exit(1); }
+            foreach (["ok","site","checked_at","problems","warnings","notes"] as $k) {
+              if (!array_key_exists($k, $d)) { fwrite(STDERR, "missing key: $k\n"); exit(1); }
+            }
+            if ($d["ok"] !== false) { fwrite(STDERR, "ok should be false\n"); exit(1); }
+            echo "json contract ok\n";
+          '
+
+      - name: backup-now 成功并留下可校验的备份
+        run: |
+          set -euo pipefail
+          php bin/backup-now.php --config=examples/fixture/site-ops.json
+          ls -l examples/fixture/backups/
+          test -n "$(ls -A examples/fixture/backups/*.sqlite.gz 2>/dev/null)" || { echo 'no backup file'; exit 1; }
+          php -r '
+            $f = glob("examples/fixture/backups/*.sqlite.gz")[0];
+            $gz = gzopen($f, "rb");
+            $head = gzread($gz, 16);
+            gzclose($gz);
+            if (strncmp($head, "SQLite format 3", 15) !== 0) { fwrite(STDERR, "not a sqlite file\n"); exit(1); }
+            echo "backup payload ok: ", basename($f), "\n";
+          '
+
+      - name: 备份后健康检查仍应只差孤儿文件（备份项转绿）
+        run: |
+          set -euo pipefail
+          out=$(php bin/health-check.php --config=examples/fixture/site-ops.json 2>&1 || true)
+          echo "$out"
+          echo "$out" | grep -q '备份目录是空的' && { echo 'backup still reported empty'; exit 1; }
+          echo ok
+
+      - name: check-links 必须只报那一个死链
+        run: |
+          set -euo pipefail
+          php -S 127.0.0.1:8123 -t examples/fixture/www > /tmp/srv.log 2>&1 &
+          srv=$!
+          trap 'kill $srv 2>/dev/null || true' EXIT
+          for i in $(seq 1 20); do
+            curl -fsS http://127.0.0.1:8123/ > /dev/null 2>&1 && break
+            sleep 0.2
+          done
+
+          set +e
+          out=$(php bin/check-links.php --start=http://127.0.0.1:8123/ 2>&1)
+          code=$?
+          set -e
+          echo "$out"
+          test "$code" -eq 1 || { echo "expected exit 1, got $code"; exit 1; }
+          echo "$out" | grep -q 'missing.php' || { echo 'missing broken link'; exit 1; }
+          # 外链与 mailto 不该被请求
+          echo "$out" | grep -q 'example.com' && { echo 'should not crawl external'; exit 1; }
+          echo ok
+
+      - name: notify-check.ps1 探活（pwsh 在 ubuntu runner 上自带）
+        run: |
+          set -euo pipefail
+          php -S 127.0.0.1:8124 -t examples/fixture/www > /tmp/srv2.log 2>&1 &
+          srv=$!
+          trap 'kill $srv 2>/dev/null || true' EXIT
+          for i in $(seq 1 20); do
+            curl -fsS http://127.0.0.1:8124/ok.php > /dev/null 2>&1 && break
+            sleep 0.2
+          done
+
+          pwsh -NoProfile -File bin/notify-check.ps1 -Url http://127.0.0.1:8124/ok.php
+
+          set +e
+          pwsh -NoProfile -File bin/notify-check.ps1 -Url http://127.0.0.1:8124/missing.php > /tmp/n.log 2>&1
+          code=$?
+          set -e
+          cat /tmp/n.log
+          test "$code" -eq 1 || { echo "expected exit 1, got $code"; exit 1; }
+          echo ok
+
+      - name: 失败时打印服务端日志
+        if: failure()
+        run: |
+          echo '--- /tmp/srv.log ---'; cat /tmp/srv.log || true
+          echo '--- /tmp/srv2.log ---'; cat /tmp/srv2.log || true
