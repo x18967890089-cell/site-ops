@@ -108,6 +108,14 @@ jobs:
           echo "$out" | grep -q '备份目录是空的' && { echo 'backup still reported empty'; exit 1; }
           echo ok
 
+      - name: 默认配置文件（不带 --config）必须能用
+        working-directory: examples/fixture
+        run: |
+          set -euo pipefail
+          php ../../bin/health-check.php --json > /tmp/h2.json || true
+          php -r '$d=json_decode(file_get_contents("/tmp/h2.json"),true); if(!is_array($d)||(($d["site"]??"")!=="fixture site")){fwrite(STDERR,"health default config failed\n");exit(1);} echo "health default config ok\n";'
+          php ../../bin/backup-now.php --json > /tmp/b2.json
+          php -r '$d=json_decode(file_get_contents("/tmp/b2.json"),true); if(!is_array($d)||(($d["ok"]??false)!==true)){fwrite(STDERR,"backup default config failed\n");exit(1);} echo "backup default config ok: ",$d["tables"]," tables\n";'
       - name: check-links 必须只报那一个死链
         run: |
           set -euo pipefail

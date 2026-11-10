@@ -44,7 +44,7 @@ function fail(string $message): void
  */
 function args(array $argv): array
 {
-    $out = ['config' => '', 'db' => '', 'out' => '', 'keep' => 0, 'mirror' => '', 'json' => false];
+    $out = ['config' => '', 'configSet' => false, 'db' => '', 'out' => '', 'keep' => 0, 'mirror' => '', 'json' => false];
     foreach (array_slice($argv, 1) as $arg) {
         if ($arg === '--json') {
             $out['json'] = true;
@@ -56,6 +56,9 @@ function args(array $argv): array
         }
         if (preg_match('/^--(config|db|out|mirror)=(.*)$/u', $arg, $m) === 1) {
             $out[$m[1]] = $m[2];
+            if ($m[1] === 'config') {
+                $out['configSet'] = true;
+            }
             continue;
         }
         if (preg_match('/^--keep=(\d+)$/u', $arg, $m) === 1) {
@@ -147,13 +150,22 @@ if (!empty($opts['json'])) {
 $root = getcwd() ?: '.';
 $config = [];
 
-if ($opts['config'] !== '') {
-    if (!is_file((string)$opts['config'])) {
-        fail('找不到配置文件: ' . $opts['config']);
+// 没有 --config 时默认读当前目录的 site-ops.json（与 health-check 一致）；
+// 显式传了 --config 就必须存在，默认文件不存在则允许纯命令行参数运行。
+$configPath = (string)$opts['config'];
+if ($configPath === '' && !$opts['configSet']) {
+    $configPath = 'site-ops.json';
+}
+if ($configPath !== '' && is_file($configPath)) {
+    $config = json_decode((string)file_get_contents($configPath), true) ?: [];
+    if (!is_array($config)) {
+        fail('配置文件不是合法 JSON 对象: ' . $configPath);
         exit(2);
     }
-    $config = json_decode((string)file_get_contents((string)$opts['config']), true) ?: [];
-    $root = dirname(realpath((string)$opts['config']) ?: (string)$opts['config']);
+    $root = dirname(realpath($configPath) ?: $configPath);
+} elseif ($opts['configSet']) {
+    fail('找不到配置文件: ' . $configPath);
+    exit(2);
 }
 
 $dbConfig = is_array($config['db'] ?? null) ? $config['db'] : [];

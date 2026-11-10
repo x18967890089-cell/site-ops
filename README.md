@@ -100,6 +100,8 @@ php bin/backup-now.php  --config=site-ops.json
 
 ### 配置
 
+两个脚本不传 `--config` 时默认读**当前目录的** `site-ops.json`；显式传了 `--config=...` 却找不到文件会直接退 2，而默认文件不存在时 `backup-now.php` 仍可用 `--db=` 纯命令行跑。
+
 `site-ops.json` 里所有相对路径都**相对配置文件所在目录**（不是相对当前工作目录）——这点是刻意的：从 cron、从别的目录、从 Windows 计划任务调用，行为都一样。
 
 ```json
@@ -171,6 +173,9 @@ schtasks /create /tn "site backup" /sc daily /st 03:20 /tr "powershell -NoProfil
 `--json` 时结果也走同一套码，`ok:false` 对应 `1`。
 
 ## 已知限制
+
+- 四脚本只在 Linux（CI）与本机 Windows 上跑过；macOS 没验过（`check-links.php` 走 curl，理论上没问题）。
+- `health-check.php` 的 MySQL/PostgreSQL 分支只做了「连不上就报错」的骨架，行数统计用 `SHOW TABLES`，没在真实业务库上跑过。
 
 - 只做「检查」，不自动修：孤儿文件、VACUUM、删旧备份之外的写操作一律不碰。
 - MySQL/PostgreSQL 的备份不做恢复演练（只保证 dump 命令返回 0 且文件非空），恢复请自己跑一次 `mysql < dump.sql`。
